@@ -28,24 +28,22 @@ def get_link_index(body, link_name):
             return i
     return None
 
-# ================= ジョイント取得 =================
 left_wheel = get_joint_index(robot, "left_wheel_joint")
 right_wheel = get_joint_index(robot, "right_wheel_joint")
 lidar_link_index = get_link_index(robot, "lidar_link")
 
-print("left wheel:", left_wheel)
-print("right wheel:", right_wheel)
-print("lidar link:", lidar_link_index)
-
 if lidar_link_index is None:
-    raise RuntimeError("lidar_link が見つかりません。URDFを確認してください。")
+    raise RuntimeError("lidar_link が見つかりません")
 
 # ================= LiDAR設定 =================
 FOV = math.radians(100)
 NUM_RAYS = 60
 MAX_DIST = 0.3
+SAFE_DIST = 0.15
+
 debug_line_ids = [-1] * NUM_RAYS
 
+# ================= LiDAR取得 =================
 def get_lidar_data():
 
     link_state = p.getLinkState(robot, lidar_link_index)
@@ -63,7 +61,6 @@ def get_lidar_data():
         dx = math.cos(angle)
         dy = math.sin(angle)
 
-        # ローカル→ワールド変換
         world_dx = rot[0]*dx + rot[1]*dy
         world_dy = rot[3]*dx + rot[4]*dy
 
@@ -90,33 +87,18 @@ def get_lidar_data():
     return distances, ray_from, ray_to, results
 
 
-# ================= 障害物回避 =================
-def obstacle_avoidance(distances):
-
-    left = distances[:NUM_RAYS//3]
-    center = distances[NUM_RAYS//3:2*NUM_RAYS//3]
-    right = distances[2*NUM_RAYS//3:]
-
-    min_center = min(center)
-    speed = 8
-
-    if min_center < 0.15:
-        if min(left) > min(right):
-            return -speed, speed
-        else:
-            return speed, -speed
-    else:
-        return speed, speed
-
-
 # ================= メインループ =================
+wheel_base = 0.1
+wheel_radius = 0.03
+
 while True:
 
+    # ===== LiDAR取得 =====
     distances, ray_from, ray_to, results = get_lidar_data()
 
+    # ===== 可視化（軽量） =====
     for i, r in enumerate(results):
         color = [1, 0, 0] if r[2] < 1 else [0, 1, 0]
-
         debug_line_ids[i] = p.addUserDebugLine(
             ray_from[i],
             ray_to[i],
@@ -125,7 +107,58 @@ while True:
             replaceItemUniqueId=debug_line_ids[i]
         )
 
-    left_speed, right_speed = obstacle_avoidance(distances)
+    # ===== ユーザー入力 =====
+    keys = p.getKeyboardEvents()
+
+    vx = 0
+    vy = 0
+    user_speed = 0.2
+
+    if ord('i') in keys:
+        vx = user_speed
+        print("前進")
+    if ord('k') in keys:
+        vx = -user_speed
+        print("後退")
+    if ord('j') in keys:
+        vy = user_speed
+        print("左移動")
+    if ord('l') in keys:
+        vy = -user_speed
+        print("右移動")
+
+    # ===== 回避ベクトル生成 =====
+    avoid_x = 0
+    avoid_y = 0
+
+    for i, d in enumerate(distances):
+        if d < SAFE_DIST:
+            angle = -FOV/2 + FOV * i/(NUM_RAYS-1)
+
+            obs_x = math.cos(angle)
+            obs_y = math.sin(angle)
+
+            weight = (SAFE_DIST - d) / SAFE_DIST
+
+            avoid_x -= obs_x * weight
+            avoid_y -= obs_y * weight
+
+    # ===== ベクトル合成 =====
+    cmd_x = vx - avoid_x
+    cmd_y = vy - avoid_y
+
+    # 正規化（暴走防止）
+    norm = math.hypot(cmd_x, cmd_y)
+    if norm > 1e-5:
+        cmd_x /= norm
+        cmd_y /= norm
+
+    # ===== 差動駆動変換 =====
+    v = cmd_x * 0.3
+    omega = cmd_y * 5.0
+
+    left_speed  = (v - omega * wheel_base/2) / wheel_radius
+    right_speed = (v + omega * wheel_base/2) / wheel_radius
 
     p.setJointMotorControl2(robot, left_wheel,
                             p.VELOCITY_CONTROL,

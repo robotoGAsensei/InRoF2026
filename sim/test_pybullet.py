@@ -44,6 +44,7 @@ if lidar_link_index is None:
 FOV = math.radians(100)
 NUM_RAYS = 60
 MAX_DIST = 0.3
+debug_line_ids = [-1] * NUM_RAYS
 
 def get_lidar_data():
 
@@ -113,10 +114,16 @@ while True:
 
     distances, ray_from, ray_to, results = get_lidar_data()
 
-    # 可視化
     for i, r in enumerate(results):
         color = [1, 0, 0] if r[2] < 1 else [0, 1, 0]
-        p.addUserDebugLine(ray_from[i], ray_to[i], color, 1, lifeTime=0.05)
+
+        debug_line_ids[i] = p.addUserDebugLine(
+            ray_from[i],
+            ray_to[i],
+            color,
+            1,
+            replaceItemUniqueId=debug_line_ids[i]
+        )
 
     left_speed, right_speed = obstacle_avoidance(distances)
 

@@ -232,14 +232,14 @@
     </inertial>
   </link>
 
-  <!-- 左サイドの青ポスト1 -->
-  <link name="left_side_blue_post_1">
+  <!-- 左サイドの赤ポスト1 -->
+  <link name="left_side_red_post_1">
     <visual>
       <geometry>
         <box size="0.255 0.1 0.54"/>
       </geometry>
-      <material name="blue">
-        <color rgba="0 0 1 1"/>
+      <material name="red">
+        <color rgba="1 0 0 1"/>
       </material>
     </visual>
 
@@ -257,14 +257,14 @@
     </inertial>
   </link>
 
-  <!-- 左サイドの青ポスト2 -->
-  <link name="left_side_blue_post_2">
+  <!-- 左サイドの赤ポスト2 -->
+  <link name="left_side_red_post_2">
     <visual>
       <geometry>
         <box size="0.255 0.1 0.54"/>
       </geometry>
-      <material name="blue">
-        <color rgba="0 0 1 1"/>
+      <material name="red">
+        <color rgba="1 0 0 1"/>
       </material>
     </visual>
 
@@ -282,14 +282,14 @@
     </inertial>
   </link>
 
-  <!-- 左サイドの青ポスト3 -->
-  <link name="left_side_blue_post_3">
+  <!-- 左サイドの赤ポスト3 -->
+  <link name="left_side_red_post_3">
     <visual>
       <geometry>
         <box size="0.01 0.5 0.84"/>
       </geometry>
-      <material name="blue">
-        <color rgba="0 0 1 1"/>
+      <material name="red">
+        <color rgba="1 0 0 1"/>
       </material>
     </visual>
 
@@ -552,21 +552,21 @@
     <origin xyz="-0.270 0.9 0.42" rpy="0 0 0"/>
   </joint>
 
-  <joint name="left_side_blue_post_1_fixed_joint" type="fixed">
+  <joint name="left_side_red_post_1_fixed_joint" type="fixed">
     <parent link="main_field"/>
-    <child link="left_side_blue_post_1"/>
+    <child link="left_side_red_post_1"/>
     <origin xyz="-0.1375 0.05 0.27" rpy="0 0 0"/>
   </joint>
 
-  <joint name="left_side_blue_post_2_fixed_joint" type="fixed">
+  <joint name="left_side_red_post_2_fixed_joint" type="fixed">
     <parent link="main_field"/>
-    <child link="left_side_blue_post_2"/>
+    <child link="left_side_red_post_2"/>
     <origin xyz="-0.1375 0.45 0.27" rpy="0 0 0"/>
   </joint>
 
-  <joint name="left_side_blue_post_3_fixed_joint" type="fixed">
+  <joint name="left_side_red_post_3_fixed_joint" type="fixed">
     <parent link="main_field"/>
-    <child link="left_side_blue_post_3"/>
+    <child link="left_side_red_post_3"/>
     <origin xyz="-0.270 0.25 0.42" rpy="0 0 0"/>
   </joint>
 

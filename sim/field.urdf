@@ -1,0 +1,435 @@
+<?xml version="1.0"?>
+<robot name="large_cube">
+
+  <!-- リンク -->
+
+  <!-- 競技台本体 -->
+  <link name="main_field">
+    <visual>
+      <origin xyz="0.9 0.9 0.25"/>
+      <geometry>
+        <box size="1.8 1.8 0.5"/>
+      </geometry>
+      <material name="white">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <origin xyz="0.9 0.9 0.25"/>
+      <geometry>
+        <box size="1.8 1.8 0.5"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <origin xyz="0.9 0.9 0.25"/>
+      <mass value="10"/>
+      <inertia ixx="1" ixy="0" ixz="0"
+              iyy="1" iyz="0"
+              izz="1"/>
+    </inertial>
+  </link>
+
+  <!-- スタート台 -->
+  <link name="start_area">
+    <visual>
+      <geometry>
+        <box size="0.5 0.5 0.5"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="0.5 0.5 0.5"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0"
+                iyy="0.01" iyz="0"
+                izz="0.01"/>
+    </inertial>
+  </link>
+
+
+  <!-- 中央の島 -->
+  <link name="center_island">
+    <visual>
+      <geometry>
+        <box size="0.28 0.9 0.04"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="0.28 0.9 0.04"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0"
+                iyy="0.01" iyz="0"
+                izz="0.01"/>
+    </inertial>
+  </link>
+
+  <!-- トップサイドの壁 -->
+  <link name="top_side_wall">
+    <visual>
+      <geometry>
+        <box size="1.8 0.01 0.54"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="1.8 0.01 0.54"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0"
+                iyy="0.01" iyz="0"
+                izz="0.01"/>
+    </inertial>
+  </link>
+
+  <!-- 右サイドの壁 -->
+  <link name="right_side_wall">
+    <visual>
+      <geometry>
+        <box size="0.01 1.8 0.54"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="0.01 1.8 0.54"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0"
+                iyy="0.01" iyz="0"
+                izz="0.01"/>
+    </inertial>
+  </link>
+
+  <!-- 左サイドの壁4 -->
+  <link name="left_side_wall_4">
+    <visual>
+      <geometry>
+        <box size="0.265 0.1 0.54"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="0.265 0.1 0.54"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0"
+                iyy="0.01" iyz="0"
+                izz="0.01"/>
+    </inertial>
+  </link>
+
+  <!-- 左サイドの壁3 -->
+  <link name="left_side_wall_3">
+    <visual>
+      <geometry>
+        <box size="0.265 0.35 0.54"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="0.265 0.35 0.54"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0"
+                iyy="0.01" iyz="0"
+                izz="0.01"/>
+    </inertial>
+  </link>
+
+  <!-- 左サイドの壁2 -->
+  <link name="left_side_wall_2">
+    <visual>
+      <geometry>
+        <box size="0.265 0.35 0.54"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="0.265 0.35 0.54"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0"
+                iyy="0.01" iyz="0"
+                izz="0.01"/>
+    </inertial>
+  </link>
+
+  <!-- 左サイドの壁1 -->
+  <link name="left_side_wall_1">
+    <visual>
+      <geometry>
+        <box size="0.265 0.1 0.54"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="0.265 0.1 0.54"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0"
+                iyy="0.01" iyz="0"
+                izz="0.01"/>
+    </inertial>
+  </link>
+
+  <!-- 左サイドのネット -->
+  <link name="left_side_net">
+    <visual>
+      <geometry>
+        <box size="0.265 0.1 0.54"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="0.265 0.1 0.54"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0"
+                iyy="0.01" iyz="0"
+                izz="0.01"/>
+    </inertial>
+  </link>
+
+  <!-- ボトムサイドの壁 -->
+  <link name="bottom_side_wall">
+    <visual>
+      <geometry>
+        <box size="1.3 0.01 0.54"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="1.3 0.01 0.54"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0"
+                iyy="0.01" iyz="0"
+                izz="0.01"/>
+    </inertial>
+  </link>
+
+  <!-- スタート左サイドの壁 -->
+  <link name="start_left_side_wall">
+    <visual>
+      <geometry>
+        <box size="0.01 0.5 0.54"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="0.01 0.5 0.54"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0"
+                iyy="0.01" iyz="0"
+                izz="0.01"/>
+    </inertial>
+  </link>
+
+
+  <!-- スタート右サイドの壁 -->
+  <link name="start_right_side_wall">
+    <visual>
+      <geometry>
+        <box size="0.01 0.5 0.54"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="0.01 0.5 0.54"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0"
+                iyy="0.01" iyz="0"
+                izz="0.01"/>
+    </inertial>
+  </link>
+
+  <!-- スタートボトムサイドの壁 -->
+  <link name="start_bottom_side_wall">
+    <visual>
+      <geometry>
+        <box size="0.5 0.01 0.54"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <geometry>
+        <box size="0.5 0.01 0.54"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="1"/>
+      <inertia ixx="0.01" ixy="0" ixz="0"
+                iyy="0.01" iyz="0"
+                izz="0.01"/>
+    </inertial>
+  </link>
+
+  <!-- ジョイント -->
+
+  <joint name="small_cube_fixed_joint" type="fixed">
+    <parent link="main_field"/>
+    <child link="start_area"/>
+    <origin xyz="0.25 -0.25 0.25" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="center_island_fixed_joint" type="fixed">
+    <parent link="main_field"/>
+    <child link="center_island"/>
+    <origin xyz="0.74 0.85 0.52" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="top_side_wall_fixed_joint" type="fixed">
+    <parent link="main_field"/>
+    <child link="top_side_wall"/>
+    <origin xyz="0.9 1.805 0.27" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="right_side_wall_fixed_joint" type="fixed">
+    <parent link="main_field"/>
+    <child link="right_side_wall"/>
+    <origin xyz="1.805 0.9 0.27" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="left_side_wall_4_fixed_joint" type="fixed">
+    <parent link="main_field"/>
+    <child link="left_side_wall_4"/>
+    <origin xyz="-0.1325 1.75 0.27" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="left_side_wall_3_fixed_joint" type="fixed">
+    <parent link="main_field"/>
+    <child link="left_side_wall_3"/>
+    <origin xyz="-0.1325 1.225 0.27" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="left_side_wall_2_fixed_joint" type="fixed">
+    <parent link="main_field"/>
+    <child link="left_side_wall_2"/>
+    <origin xyz="-0.1325 0.575 0.27" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="left_side_wall_1_fixed_joint" type="fixed">
+    <parent link="main_field"/>
+    <child link="left_side_wall_1"/>
+    <origin xyz="-0.1325 0.05 0.27" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="bottom_side_wall_fixed_joint" type="fixed">
+    <parent link="main_field"/>
+    <child link="bottom_side_wall"/>
+    <origin xyz="1.15 -0.005 0.27" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="start_left_side_wall_fixed_joint" type="fixed">
+    <parent link="main_field"/>
+    <child link="start_left_side_wall"/>
+    <origin xyz="-0.005 -0.25 0.27" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="start_right_side_wall_fixed_joint" type="fixed">
+    <parent link="main_field"/>
+    <child link="start_right_side_wall"/>
+    <origin xyz="0.505 -0.25 0.27" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="start_bottom_side_wall_fixed_joint" type="fixed">
+    <parent link="main_field"/>
+    <child link="start_bottom_side_wall"/>
+    <origin xyz="0.25 -0.505 0.27" rpy="0 0 0"/>
+  </joint>
+
+</robot>

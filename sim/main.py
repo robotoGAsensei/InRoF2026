@@ -2,11 +2,15 @@ import pybullet as p
 import pybullet_data
 import time
 import math
+import numpy as np
 
 from util import get_joint_index, get_link_index
 from robot import DifferentialRobot
 from lidar import Lidar
 from obstacle_avoidance import ObstacleAvoidance
+from extendedkalmanfilter import EKFLocalization
+from odometry import Odometry
+from imu_localization import IMULocalization
 
 # ===== 初期化 =====
 p.connect(p.GUI)
@@ -29,6 +33,49 @@ avoidance = ObstacleAvoidance(
     fov=lidar.FOV,
     num_rays=lidar.NUM_RAYS,
     safe_dist=0.15
+)
+
+# 共通の物理パラメータ
+wheel_radius=0.03
+wheel_base=0.1
+dt=1./240.
+initial_x=0.25
+initial_y=-0.25
+initial_theta=0
+
+# ３種類の推定方式の初期化
+ekf = EKFLocalization(
+    robot_id,
+    left,
+    right,
+    wheel_radius,
+    wheel_base,
+    dt,
+    initial_x=initial_x,
+    initial_y=initial_y,
+    initial_theta=initial_theta
+)
+
+odom = Odometry(
+    robot_id,
+    left,
+    right,
+    wheel_radius,
+    wheel_base,
+    dt,
+    initial_x=initial_x,
+    initial_y=initial_y,
+    initial_theta=initial_theta
+)
+
+imu_loc = IMULocalization(
+    robot_id=robot_id,
+    dt=dt,
+    accel_noise_std=0.05,
+    gyro_noise_std=0.01,
+    initial_x=initial_x,
+    initial_y=initial_y,
+    initial_theta=initial_theta
 )
 
 # ===== メインループ =====
@@ -66,5 +113,32 @@ while True:
 
     robot.set_velocity_vector(cmd_x, cmd_y)
 
+
+
+    ########### 1. エンコーダとIMUを使った拡張カルマンフィルタ ###########
+
+    ekf.step()
+    ekf_x, ekf_y, ekf_theta = ekf.get_state()
+
+    ############ 2. エンコーダによるホイールオドメトリ ###########
+
+    odom.step()
+    odom_x, odom_y, odom_theta = odom.get_state()
+
+    ############ 3. IMUによる慣性航法 ###########
+
+    imu_loc.update()
+    imu_x, imu_y, imu_theta, _, _ = imu_loc.get_state()
+
+    ########### 4. 真値の取得 ###########
+
+    true_pos, true_orn = p.getBasePositionAndOrientation(robot_id)
+    _, _, true_yaw = p.getEulerFromQuaternion(true_orn)
+
+    ########### 5. 表示（小数点第2位） ###########
+
+    print(f"X: ({true_pos[0]:.2f}, {ekf_x:.2f}, {odom_x:.2f}, {imu_x:.2f})  Y: ({true_pos[1]:.2f}, {ekf_y:.2f}, {odom_y:.2f}, {imu_y:.2f}) ")
+
+
     p.stepSimulation()
-    time.sleep(1./240.)
+    time.sleep(dt)

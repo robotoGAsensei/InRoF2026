@@ -4,9 +4,9 @@ import math
 class Lidar:
 
     def __init__(self, robot_id, link_index,
-                 fov=math.radians(100),
+                 fov=math.radians(85),
                  num_rays=60,
-                 max_dist=0.3):
+                 max_dist=1.0):
 
         self.robot = robot_id
         self.link = link_index

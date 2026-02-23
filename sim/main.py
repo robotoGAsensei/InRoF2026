@@ -8,7 +8,7 @@ from util import get_joint_index, get_link_index
 from robot import DifferentialRobot
 from lidar import Lidar
 from obstacle_avoidance import ObstacleAvoidance
-from extendedkalmanfilter import EKFLocalization
+from complocalization import ComplementaryLocalization
 from odometry import Odometry
 from imu_localization import IMULocalization
 
@@ -46,7 +46,7 @@ wheel_base=0.1
 dt=1./240.
 
 # ３種類の推定方式の初期化
-ekf = EKFLocalization(
+comp_loc = ComplementaryLocalization(
     robot_id,
     left,
     right,
@@ -117,10 +117,10 @@ while True:
 
 
 
-    ########### 1. エンコーダとIMUを使った拡張カルマンフィルタ ###########
+    ########### 1. エンコーダとIMUを使った補完フィルタ ###########
 
-    ekf.step()
-    ekf_x, ekf_y, ekf_theta = ekf.get_state()
+    comp_loc.step()
+    comp_x, comp_y, comp_theta = comp_loc.get_state()
 
     ############ 2. エンコーダによるホイールオドメトリ ###########
 
@@ -139,7 +139,7 @@ while True:
 
     ########### 5. 表示（小数点第2位） ###########
 
-    print(f"X: ({true_pos[0]:.2f}, {ekf_x:.2f}, {odom_x:.2f}, {imu_x:.2f})  Y: ({true_pos[1]:.2f}, {ekf_y:.2f}, {odom_y:.2f}, {imu_y:.2f}) ")
+    print(f"X: ({true_pos[0]:.2f}, {comp_x:.2f}, {odom_x:.2f}, {imu_x:.2f})  Y: ({true_pos[1]:.2f}, {comp_y:.2f}, {odom_y:.2f}, {imu_y:.2f}) ")
 
 
     p.stepSimulation()

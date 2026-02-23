@@ -20,7 +20,9 @@ p.setGravity(0, 0, -9.8)
 p.loadURDF("plane.urdf")
 p.loadURDF("field.urdf", [0, 0, 0], useFixedBase=True)
 
-robot_id = p.loadURDF("robot.urdf", [0.25, -0.25, 0.55])
+yaw = math.pi / 2   # 90°
+orn = p.getQuaternionFromEuler([0, 0, yaw])
+robot_id = p.loadURDF("robot.urdf",[0.25, -0.25, 0.55],orn)
 
 left = get_joint_index(robot_id, "left_wheel_joint")
 right = get_joint_index(robot_id, "right_wheel_joint")
@@ -35,13 +37,13 @@ avoidance = ObstacleAvoidance(
     safe_dist=0.15
 )
 
+init_pos, init_orn = p.getBasePositionAndOrientation(robot_id)
+_, _, init_yaw = p.getEulerFromQuaternion(init_orn)
+
 # 共通の物理パラメータ
 wheel_radius=0.03
 wheel_base=0.1
 dt=1./240.
-initial_x=0.25
-initial_y=-0.25
-initial_theta=0
 
 # ３種類の推定方式の初期化
 ekf = EKFLocalization(
@@ -51,9 +53,9 @@ ekf = EKFLocalization(
     wheel_radius,
     wheel_base,
     dt,
-    initial_x=initial_x,
-    initial_y=initial_y,
-    initial_theta=initial_theta
+    initial_x=init_pos[0],
+    initial_y=init_pos[1],
+    initial_theta=init_yaw
 )
 
 odom = Odometry(
@@ -63,9 +65,9 @@ odom = Odometry(
     wheel_radius,
     wheel_base,
     dt,
-    initial_x=initial_x,
-    initial_y=initial_y,
-    initial_theta=initial_theta
+    initial_x=init_pos[0],
+    initial_y=init_pos[1],
+    initial_theta=init_yaw
 )
 
 imu_loc = IMULocalization(
@@ -73,9 +75,9 @@ imu_loc = IMULocalization(
     dt=dt,
     accel_noise_std=0.05,
     gyro_noise_std=0.01,
-    initial_x=initial_x,
-    initial_y=initial_y,
-    initial_theta=initial_theta
+    initial_x=init_pos[0],
+    initial_y=init_pos[1],
+    initial_theta=init_yaw
 )
 
 # ===== メインループ =====

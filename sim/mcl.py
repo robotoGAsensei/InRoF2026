@@ -1,5 +1,3 @@
-# mcl.py
-
 import numpy as np
 import math
 import pybullet as p
@@ -38,13 +36,11 @@ class MCL:
 
         # センサノイズ
         self.motion_noise_std = 0.02
-        self.sensor_noise_std = 0.05
+        self.sensor_noise_std = 0.1   # ← 少し緩めた（重要）
 
         # Lidar parameters（既存 lidar と揃える）
         self.FOV = math.radians(85)
-        self.NUM_RAYS = 60
         self.MAX_DIST = 1.0
-
 
     # ==================================================
     # Motion Update
@@ -65,6 +61,9 @@ class MCL:
             y += noisy_v * math.sin(theta) * self.dt
             theta += noisy_w * self.dt
 
+            # 角度正規化（重要）
+            theta = math.atan2(math.sin(theta), math.cos(theta))
+
             self.particles[i] = [x, y, theta]
 
 
@@ -74,62 +73,72 @@ class MCL:
     def sensor_update(self, real_distances):
 
         log_weights = np.zeros(self.N)
+        num_rays = len(real_distances)
 
         for i in range(self.N):
 
             x, y, theta = self.particles[i]
-            log_weight = 0.0
 
-            for j in range(self.NUM_RAYS):
+            ray_from_list = []
+            ray_to_list = []
+            valid_indices = []
 
-                angle = -self.FOV/2 + self.FOV * j/(self.NUM_RAYS-1)
+            # -------------------------------
+            # 有効レイだけ抽出
+            # -------------------------------
+            for j in range(num_rays):
+
+                if real_distances[j] >= self.MAX_DIST * 0.99:
+                    continue
+
+                angle = -self.FOV/2 + self.FOV * j/(num_rays-1)
                 world_angle = theta + angle
 
                 ray_from = [x, y, self.lidar_height]
-
                 ray_to = [
                     x + math.cos(world_angle) * self.MAX_DIST,
                     y + math.sin(world_angle) * self.MAX_DIST,
                     self.lidar_height
                 ]
 
-                # rayTestは、ray_fromからray_toに向かってレイを飛ばし、最初に衝突するオブジェクトとの距離を返す関数
-                # 既知マップ(field.urdf)と仮説位置から計算される距離を得るために使用するpybulletの機能
-                # 実際のロボットではrayTest相当の機能を実装する必要がある
-                result = p.rayTest(ray_from, ray_to)[0]
+                ray_from_list.append(ray_from)
+                ray_to_list.append(ray_to)
+                valid_indices.append(j)
 
-                # 仮説位置をたくさん用意し
-                # それぞれについて「その位置ならこう見えるはず」を計算したのがsim_dist
-                # sim_distは既知マップと仮説位置から計算される距離
+            # 有効レイが無い場合
+            if len(valid_indices) == 0:
+                log_weights[i] = 0.0
+                continue
+
+            # -------------------------------
+            # rayTestBatchで高速化
+            # -------------------------------
+            results = p.rayTestBatch(ray_from_list, ray_to_list)
+
+            error_sum = 0.0
+
+            for k, result in enumerate(results):
+
                 if result[2] < 1.0:
                     sim_dist = result[2] * self.MAX_DIST
                 else:
                     sim_dist = self.MAX_DIST
 
-                # --- MAXレンジは情報量が低いので除外 ---
-                if real_distances[j] >= self.MAX_DIST * 0.99:
-                    continue
                 if sim_dist >= self.MAX_DIST * 0.99:
                     continue
 
-                error = real_distances[j] - sim_dist
+                real_d = real_distances[valid_indices[k]]
+                error = real_d - sim_dist
 
-                # 仮説位置の確からしさを計算
-                # 実際の位置が10cmだとして、仮説位置が5cmの場合に、
-                # sim_dist=5であっても観測値としては10付近が観測されるのでerrorが大きくなる
-                # つまり仮説位置が5cmの場合に10cm付近が観測される確率は小さい事を表している
-                # RAYの数が60本なら60本分の確率を掛け合わせて ※
-                # 作った重み係数は、その仮説位置の総合的な確からしさを表す指標になる
-                #
-                # もしくは、
-                # 仮説位置 x_i が正しいと仮定したときに、
-                # 現在のLidar観測全体が得られる確率を計算している。
-                # rayごとの尤度を掛け合わせることで ※
-                # 粒子の総合的な尤度（重み）を求めている。
-                # ※途中計算はlog空間で行うため実装上は足し算になっている
-                log_weight += -(error**2) / (2 * self.sensor_noise_std**2)
+                error_sum += error**2
 
-            log_weights[i] = log_weight
+            # -------------------------------
+            # ★ ここが最重要修正 ★
+            # レイ数で平均化して鋭さを抑える
+            # -------------------------------
+            error_mean = error_sum / len(valid_indices)
+
+            log_weights[i] = -(error_mean) / (2 * self.sensor_noise_std**2)
 
         # ==============================
         # log-sum-exp 安定化
@@ -138,7 +147,6 @@ class MCL:
         max_log = np.max(log_weights)
         log_weights -= max_log
 
-        # 途中計算はlog空間で行い、最後に指数を取ることで数値の安定性を保つ
         weights = np.exp(log_weights)
 
         # ゼロ割り防止
@@ -147,12 +155,18 @@ class MCL:
 
         self.weights = weights
 
+
     # ==================================================
     # Resampling　「確からしい粒子を増やし、あり得ない粒子を消す」操作
     # ==================================================
     def resample(self):
 
-        # 確率分布の累積和
+        ess = 1.0 / np.sum(self.weights ** 2)
+
+        # 粒子の半分以下になったらリサンプリング
+        if ess > self.N / 2:
+            return
+
         cumulative = np.cumsum(self.weights)
         step = 1.0 / self.N
         r = np.random.uniform(0, step)
@@ -168,7 +182,6 @@ class MCL:
 
         self.particles = np.array(new_particles)
         self.weights.fill(1.0 / self.N)
-
 
     # ==================================================
     # 推定値（角度を正しく平均）

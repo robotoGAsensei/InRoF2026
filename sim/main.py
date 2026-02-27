@@ -21,7 +21,7 @@ p.loadURDF("field.urdf", [0, 0, 0], useFixedBase=True)
 
 yaw = math.pi / 2   # 90°
 orn = p.getQuaternionFromEuler([0, 0, yaw])
-robot_id = p.loadURDF("robot.urdf",[0.25, -0.25, 0.55],orn)
+robot_id = p.loadURDF("robot.urdf",[0.25, -0.25, 0.05],orn)
 
 left = get_joint_index(robot_id, "left_wheel_joint")
 right = get_joint_index(robot_id, "right_wheel_joint")

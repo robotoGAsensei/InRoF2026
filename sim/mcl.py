@@ -35,12 +35,12 @@ class MCL:
         self.weights = np.ones(self.N) / self.N
 
         # センサノイズ
-        self.motion_noise_std = 0.02
-        self.sensor_noise_std = 0.1   # ← 少し緩めた（重要）
+        self.motion_noise_std = 0.05
+        self.sensor_noise_std = 0.2   # ← 少し緩めた（重要）
 
         # Lidar parameters（既存 lidar と揃える）
-        self.FOV = math.radians(85)
-        self.MAX_DIST = 1.0
+        self.FOV = math.radians(180)
+        self.MAX_DIST = 2.0
 
     # ==================================================
     # Motion Update

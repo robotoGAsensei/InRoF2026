@@ -1,45 +1,62 @@
 import pybullet as p
 import math
 
+
 class Lidar:
 
     def __init__(self, robot_id, link_index,
                  fov=math.radians(85),
                  num_rays=60,
-                 max_dist=1.0):
+                 max_dist=1.0,
+                 lidar_height=0.03):   # ← 高さ固定追加
 
         self.robot = robot_id
         self.link = link_index
         self.FOV = fov
         self.NUM_RAYS = num_rays
         self.MAX_DIST = max_dist
+        self.LIDAR_HEIGHT = lidar_height
         self.debug_ids = [-1] * num_rays
 
     def scan(self):
 
+        # LiDARの位置取得（x,yのみ使用）
         link_state = p.getLinkState(self.robot, self.link)
         base_pos = link_state[0]
-        base_orn = link_state[1]
 
-        rot = p.getMatrixFromQuaternion(base_orn)
+        # ロボットの姿勢取得
+        _, base_orn = p.getBasePositionAndOrientation(self.robot)
+        _, _, yaw = p.getEulerFromQuaternion(base_orn)
+
+        # yawのみ使用（roll/pitch無視）
+        flat_orn = p.getQuaternionFromEuler([0, 0, yaw])
+        rot = p.getMatrixFromQuaternion(flat_orn)
 
         ray_from = []
         ray_to = []
 
         for i in range(self.NUM_RAYS):
-            angle = -self.FOV/2 + self.FOV * i/(self.NUM_RAYS-1)
+
+            angle = -self.FOV / 2 + self.FOV * i / (self.NUM_RAYS - 1)
 
             dx = math.cos(angle)
             dy = math.sin(angle)
 
-            world_dx = rot[0]*dx + rot[1]*dy
-            world_dy = rot[3]*dx + rot[4]*dy
+            # yaw回転適用
+            world_dx = rot[0] * dx + rot[1] * dy
+            world_dy = rot[3] * dx + rot[4] * dy
 
-            from_pos = base_pos
+            # 高さ固定（完全2D化）
+            from_pos = [
+                base_pos[0],
+                base_pos[1],
+                self.LIDAR_HEIGHT
+            ]
+
             to_pos = [
                 base_pos[0] + world_dx * self.MAX_DIST,
                 base_pos[1] + world_dy * self.MAX_DIST,
-                base_pos[2]
+                self.LIDAR_HEIGHT
             ]
 
             ray_from.append(from_pos)
@@ -48,6 +65,7 @@ class Lidar:
         results = p.rayTestBatch(ray_from, ray_to)
 
         distances = []
+
         for r in results:
             hit_fraction = r[2]
             if hit_fraction < 1.0:

@@ -79,7 +79,7 @@ def angle_diff(a, b):
 while True:
 
     distances, ray_from, ray_to, results = lidar.scan()
-    # lidar.draw(ray_from, ray_to, results)
+    lidar.draw(ray_from, ray_to, results)
 
     # ===== キー入力 =====
     keys = p.getKeyboardEvents()

@@ -2,6 +2,7 @@ import pybullet as p
 import pybullet_data
 import time
 import math
+import os
 import numpy as np
 
 from util import get_joint_index, get_link_index
@@ -63,7 +64,18 @@ def angle_diff(a, b):
     角度差を -π〜π に正規化
     """
     return np.arctan2(np.sin(a - b), np.cos(a - b))
-
+def _ndc_to_world(ndc_x: float, ndc_y: float, ndc_z: float = 0.0) -> list:
+    """
+    NDC座標 (ndc_x, ndc_y 共に -1～1) をワールド座標へ変換。
+    カメラ姿勢に追従する画面固定位置の計算に使用。
+    """
+    cam = p.getDebugVisualizerCamera()
+    V   = np.array(cam[2]).reshape(4, 4).T   # column-major → row-major
+    P   = np.array(cam[3]).reshape(4, 4).T
+    vp_inv = np.linalg.inv(P @ V)
+    ndc_h  = np.array([ndc_x, ndc_y, ndc_z, 1.0])
+    world_h = vp_inv @ ndc_h
+    return (world_h[:3] / world_h[3]).tolist()
 # ===== 軌跡描画用の前ステップ位置 =====
 _TRAJ_Z = 0.02  # 地面より少し上に描画
 prev_odom_x, prev_odom_y   = init_pos[0], init_pos[1]
@@ -79,6 +91,15 @@ _PRINT_EVERY = 120  # コンソール出力:        240/120 =  2 Hz
 _cached_distances = [1.0] * lidar.NUM_RAYS
 _cached_avoid     = (0.0, 0.0)
 
+# ===== HUD テキスト（アニメーション内表示）用 ID =====
+_hud_ids = [-1, -1, -1]  # 3行分
+
+# ===== 録画用 =====
+_video_log_id  = -1   # -1 = 未録画
+_video_dir     = os.path.dirname(os.path.abspath(__file__))
+_video_counter = 0    # 連番（複数回録画対応）
+_prev_r_key    = False  # チャタリング防止用
+
 # ===== メインループ =====
 while True:
     _step += 1
@@ -93,6 +114,20 @@ while True:
 
     # ===== キー入力 =====
     keys = p.getKeyboardEvents()
+
+    # ===== 録画トグル (r キー) =====
+    r_pressed = ord('r') in keys
+    if r_pressed and not _prev_r_key:
+        if _video_log_id == -1:
+            _video_counter += 1
+            _video_path = os.path.join(_video_dir, f"sim_record_{_video_counter:03d}.mp4")
+            _video_log_id = p.startStateLogging(p.STATE_LOGGING_VIDEO_MP4, _video_path)
+            print(f"[録画開始] {_video_path}")
+        else:
+            p.stopStateLogging(_video_log_id)
+            _video_log_id = -1
+            print(f"[録画停止] {_video_path} に保存しました")
+    _prev_r_key = r_pressed
 
     # vx: 並進方向の入力（前進=+, 後退=-）  ※ワールドX軸ではない
     # vy: 旋回方向の入力（右旋回=+, 左旋回=-）※ワールドY軸への移動ではない
@@ -132,13 +167,6 @@ while True:
         true_pos, true_orn = p.getBasePositionAndOrientation(robot_id)
         _, _, true_theta = p.getEulerFromQuaternion(true_orn)
 
-
-    # ===== 軌跡描画・出力（間引き）=====
-    if _step % _DRAW_EVERY == 0 or _step % _PRINT_EVERY == 0:
-        odom_x, odom_y, odom_theta = odom.get_state()
-        true_pos, true_orn = p.getBasePositionAndOrientation(robot_id)
-        _, _, true_theta = p.getEulerFromQuaternion(true_orn)
-
         if _step % _DRAW_EVERY == 0:
             # オドメトリ軌跡: 青
             if math.hypot(odom_x - prev_odom_x, odom_y - prev_odom_y) > 1e-4:
@@ -163,12 +191,22 @@ while True:
 
         if _step % _PRINT_EVERY == 0:
             theta_err_odom = angle_diff(true_theta, odom_theta)
-            print(
-                f"X: (Tr {true_pos[0]:.2f}, Od {odom_x:.2f})  "
-                f"Y: (Tr {true_pos[1]:.2f}, Od {odom_y:.2f})  "
-                f"θ: (Tr {true_theta:.2f}, Od {odom_theta:.2f})  "
-                f"θerr(O:{theta_err_odom:.3f})"
-            )
+            hud_lines = [
+                (f"True  X:{true_pos[0]:+.3f}  Y:{true_pos[1]:+.3f}  th:{math.degrees(true_theta):+.1f}deg", [0.2, 0.4, 1.0]),
+                (f"Odom  X:{odom_x:+.3f}  Y:{odom_y:+.3f}  th:{math.degrees(odom_theta):+.1f}deg",           [0.2, 0.9, 0.2]),
+                (f"Err   dth:{math.degrees(theta_err_odom):+.1f}deg",                                         [0.0, 0.0, 0.0]),
+            ]
+            # addUserDebugText は \n 非対応のため1行ずつ描画
+            # NDC y 座標をずらして縦に並べる (-0.80, -0.88, -0.96)
+            for i, ((text, color), ndc_y) in enumerate(zip(hud_lines, [-0.80, -0.88, -0.96])):
+                pos = _ndc_to_world(0.35, ndc_y)
+                _hud_ids[i] = p.addUserDebugText(
+                    text,
+                    textPosition=pos,
+                    textColorRGB=color,
+                    textSize=1.0,
+                    **({} if _hud_ids[i] == -1 else {"replaceItemUniqueId": _hud_ids[i]}),
+                )
 
     p.stepSimulation()
     time.sleep(dt)

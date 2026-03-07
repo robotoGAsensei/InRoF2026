@@ -4,6 +4,10 @@ import time
 import math
 import os
 import numpy as np
+import importlib.util
+import matplotlib
+matplotlib.use("TkAgg")   # PyBullet GUI と共存できる非ブロッキングバックエンド
+import matplotlib.pyplot as plt
 
 from util import get_joint_index, get_link_index
 from robot import DifferentialRobot
@@ -64,6 +68,7 @@ def angle_diff(a, b):
     角度差を -π〜π に正規化
     """
     return np.arctan2(np.sin(a - b), np.cos(a - b))
+
 def _ndc_to_world(ndc_x: float, ndc_y: float, ndc_z: float = 0.0) -> list:
     """
     NDC座標 (ndc_x, ndc_y 共に -1～1) をワールド座標へ変換。
@@ -76,7 +81,42 @@ def _ndc_to_world(ndc_x: float, ndc_y: float, ndc_z: float = 0.0) -> list:
     ndc_h  = np.array([ndc_x, ndc_y, ndc_z, 1.0])
     world_h = vp_inv @ ndc_h
     return (world_h[:3] / world_h[3]).tolist()
-# ===== 軌跡描画用の前ステップ位置 =====
+
+# ===== occupancy_grid_data 読み込み =====
+_grid_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "occupancy_grid_data.py")
+_spec = importlib.util.spec_from_file_location("occupancy_grid_data", _grid_py)
+_gmod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_gmod)
+_grid      = np.array(_gmod.GRID, dtype=np.uint8)
+_grid_res  = _gmod.RESOLUTION          # m/cell
+_grid_orig = _gmod.ORIGIN              # (x_min, y_min) [m]
+
+def _world_to_grid(wx: float, wy: float):
+    """ワールド座標 → グリッドのピクセル座標 (col, row) に変換。"""
+    col = int((wx - _grid_orig[0]) / _grid_res)
+    row = int((wy - _grid_orig[1]) / _grid_res)
+    return col, row
+
+# ===== matplotlib マップウィンドウ初期化 =====
+plt.ion()
+_fig, _ax = plt.subplots(figsize=(5, 6))
+_extent = [
+    _grid_orig[0],
+    _grid_orig[0] + _gmod.WIDTH  * _grid_res,
+    _grid_orig[1],
+    _grid_orig[1] + _gmod.HEIGHT * _grid_res,
+]
+_ax.imshow(_grid, origin="lower", cmap="gray_r", extent=_extent, vmin=0, vmax=1)
+_ax.set_title("Occupancy Grid")
+_ax.set_xlabel("X [m]")
+_ax.set_ylabel("Y [m]")
+_ax.set_aspect("equal")
+# 現在位置マーカー（初期位置に配置）
+_marker_true, = _ax.plot([], [], "go", markersize=8, label="True",  zorder=5)
+_marker_odom, = _ax.plot([], [], "bo", markersize=8, label="Odom",  zorder=5)
+_ax.legend(loc="upper right", fontsize=8)
+plt.tight_layout()
+plt.pause(0.001)
 _TRAJ_Z = 0.02  # 地面より少し上に描画
 prev_odom_x, prev_odom_y   = init_pos[0], init_pos[1]
 prev_true_x, prev_true_y   = init_pos[0], init_pos[1]
@@ -168,6 +208,11 @@ while True:
         _, _, true_theta = p.getEulerFromQuaternion(true_orn)
 
         if _step % _DRAW_EVERY == 0:
+            # ===== グリッドマップ上の現在位置を更新 =====
+            _marker_true.set_data([true_pos[0]], [true_pos[1]])
+            _marker_odom.set_data([odom_x],      [odom_y])
+            _fig.canvas.flush_events()
+
             # オドメトリ軌跡: 青
             if math.hypot(odom_x - prev_odom_x, odom_y - prev_odom_y) > 1e-4:
                 p.addUserDebugLine(

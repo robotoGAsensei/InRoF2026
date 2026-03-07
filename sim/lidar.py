@@ -62,6 +62,14 @@ class Lidar:
             ray_from.append(from_pos)
             ray_to.append(to_pos)
 
+        # rayTestBatchの結果はリストで、各要素は以下のタプル構造を持つ
+        # results[i] = (
+        #     objectUniqueId,   # [0] ヒットしたオブジェクトのID（ミス時は -1）
+        #     linkIndex,        # [1] ヒットしたリンクのインデックス（ミス時は -1）
+        #     hitFraction,      # [2] レイ長さに対するヒット位置の割合 0.0〜1.0（ミス時は 1.0）
+        #     hitPosition,      # [3] ヒット座標 (x, y, z)（ミス時は (0, 0, 0)）
+        #     hitNormal,        # [4] ヒット面の法線ベクトル (x, y, z)（ミス時は (0, 0, 0)）
+        # )
         results = p.rayTestBatch(ray_from, ray_to)
 
         distances = []

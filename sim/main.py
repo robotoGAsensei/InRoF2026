@@ -18,10 +18,12 @@ p.setGravity(0, 0, -9.8)
 p.loadURDF("plane.urdf")
 p.loadURDF("field.urdf", [0, 0, 0], useFixedBase=True)
 
+# ===== ロボットの初期姿勢を指定してurdfをロード =====
 yaw = math.pi / 2   # 90°
 orn = p.getQuaternionFromEuler([0, 0, yaw])
 robot_id = p.loadURDF("robot.urdf",[0.25, -0.25, 0.05],orn)
 
+# ===== 使用部品のインデックスを取得 =====
 left = get_joint_index(robot_id, "left_wheel_joint")
 right = get_joint_index(robot_id, "right_wheel_joint")
 lidar_link = get_link_index(robot_id, "lidar_link")
@@ -92,20 +94,25 @@ while True:
     # ===== キー入力 =====
     keys = p.getKeyboardEvents()
 
+    # vx: 並進方向の入力（前進=+, 後退=-）  ※ワールドX軸ではない
+    # vy: 旋回方向の入力（右旋回=+, 左旋回=-）※ワールドY軸への移動ではない
     vx = 0
     vy = 0
     speed = 0.2
 
     if ord('i') in keys:
-        vx = -speed
+        vx = -speed   # 後退
     if ord('k') in keys:
-        vx = speed
+        vx = speed    # 前進
     if ord('j') in keys:
-        vy = -speed
+        vy = -speed   # 左旋回
     if ord('l') in keys:
-        vy = speed
+        vy = speed    # 右旋回
 
-    # ===== 回避ベクトル =====
+    # ===== 回避ベクトル合成 =====
+    # cmd_x → robot.set_velocity_vector 内で 並進速度 v [m/s] に変換
+    # cmd_y → robot.set_velocity_vector 内で 角速度 omega [rad/s] に変換
+    # （差動駆動のため横移動不可。cmd_y は旋回にマッピングされる）
     cmd_x = vx + avoid_x
     cmd_y = vy + avoid_y
 

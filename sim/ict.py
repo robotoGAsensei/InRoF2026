@@ -1,6 +1,5 @@
 import math
 import numpy as np
-from scipy.optimize import minimize
 
 from lidar import Lidar          # 実機 LiDAR（pybullet rayTestBatch）
 from lidar_odm import LidarOdm  # グリッドマップ LiDAR シミュレータ
@@ -19,8 +18,9 @@ class ICT:
         map を保持しており scan(x, y, yaw) で距離列を生成する。
     """
 
-    def __init__(self, lidar_odm: LidarOdm):
-        self.lidar_odm = lidar_odm
+    def __init__(self, lidar_odm: LidarOdm, min_hit_ratio: float = 0.5):
+        self.lidar_odm    = lidar_odm
+        self.min_hit_ratio = min_hit_ratio  # スキップ閾値（有効レイ比率の最低値）
 
     # ------------------------------------------------------------------
     # 内部コスト関数
@@ -49,12 +49,35 @@ class ICT:
         return float(np.dot(diff, diff))
 
     # ------------------------------------------------------------------
+    # 数値偏微分（中心差分）
+    # ------------------------------------------------------------------
+
+    def _gradient(self, dx, dy, dtheta, ref_distances, base_x, base_y, base_yaw,
+                  h_xy=1e-3, h_th=1e-2):
+        """コスト関数の (dx, dy, dtheta) に関する偏微分を中心差分で求める。
+
+        Returns
+        -------
+        (gx, gy, gtheta) : float  各変数に関する偏微分値
+        """
+        gx = (self._cost([dx + h_xy, dy,         dtheta        ], ref_distances, base_x, base_y, base_yaw)
+            - self._cost([dx - h_xy, dy,         dtheta        ], ref_distances, base_x, base_y, base_yaw)) / (2 * h_xy)
+        gy = (self._cost([dx,        dy + h_xy,  dtheta        ], ref_distances, base_x, base_y, base_yaw)
+            - self._cost([dx,        dy - h_xy,  dtheta        ], ref_distances, base_x, base_y, base_yaw)) / (2 * h_xy)
+        gt = (self._cost([dx,        dy,         dtheta + h_th ], ref_distances, base_x, base_y, base_yaw)
+            - self._cost([dx,        dy,         dtheta - h_th ], ref_distances, base_x, base_y, base_yaw)) / (2 * h_th)
+        return gx, gy, gt
+
+    # ------------------------------------------------------------------
     # 公開 API
     # ------------------------------------------------------------------
 
     def match(self, ref_distances, base_x, base_y, base_yaw,
-              x0=None, method="Nelder-Mead", options=None):
+              lr=1.0e-4, maxiter=10):
         """スキャンマッチングを実行し最適姿勢 (x, y, theta) を返す。
+
+        誤差の二乗和を x, y, theta で偏微分し、誤差が減る方向へ
+        学習率 lr だけ修正することを maxiter 回繰り返す。
 
         Parameters
         ----------
@@ -63,40 +86,36 @@ class ICT:
         base_x   : float  オドメトリ推定 X 座標 [m]
         base_y   : float  オドメトリ推定 Y 座標 [m]
         base_yaw : float  オドメトリ推定 yaw 角 [rad]
-        x0       : array-like, optional
-            最適化初期値 [dx, dy, dtheta]。省略時は [0, 0, 0]。
-        method   : str
-            scipy.optimize.minimize の最適化手法。
-            勾配不要の "Nelder-Mead" を既定とする。
-        options  : dict, optional
-            scipy.optimize.minimize に渡すオプション。
+        lr       : float  学習率（既定 1e-4）
+        maxiter  : int    イテレーション回数（既定 200）
 
         Returns
         -------
-        best_x   : float          最適 X 座標 [m]
-        best_y   : float          最適 Y 座標 [m]
-        best_yaw : float          最適 yaw 角 [rad]
-        result   : OptimizeResult scipy の最適化結果オブジェクト
+        best_x   : float       最適 X 座標 [m]
+        best_y   : float       最適 Y 座標 [m]
+        best_yaw : float       最適 yaw 角 [rad]
+        result   : dict | None
+            {'iters': int}。スキップ時は None。
         """
-        if x0 is None:
-            x0 = [0.0, 0.0, 0.0]
-        if options is None:
-            options = {"xatol": 1e-4, "fatol": 1e-6, "maxiter": 2000}
+        # 有効レイ（max_dist 未満でヒットしたレイ）の比率チェック
+        max_dist = self.lidar_odm.MAX_DIST
+        hit_count = sum(1 for d in ref_distances if d < max_dist)
+        if hit_count < len(ref_distances) * self.min_hit_ratio:
+            return base_x, base_y, base_yaw, None
 
-        result = minimize(
-            self._cost,
-            x0,
-            args=(ref_distances, base_x, base_y, base_yaw),
-            method=method,
-            options=options,
-        )
+        dx, dy, dtheta = 0.0, 0.0, 0.0
+        for _ in range(maxiter):
+            gx, gy, gt = self._gradient(dx, dy, dtheta, ref_distances,
+                                        base_x, base_y, base_yaw)
+            dx     -= lr * gx
+            dy     -= lr * gy
+            dtheta -= lr * gt
 
-        dx, dy, dtheta = result.x
         best_x   = base_x   + dx
         best_y   = base_y   + dy
         best_yaw = base_yaw + dtheta
 
-        return best_x, best_y, best_yaw, result
+        return best_x, best_y, best_yaw, {"iters": maxiter}
 
     # ------------------------------------------------------------------
     # ユーティリティ

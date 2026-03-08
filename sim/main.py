@@ -240,10 +240,11 @@ def main():
         #   cached_distances : 実機 LiDAR から取得した距離配列に相当
         if step % ICT_EVERY == 0:
             base_x, base_y, base_theta = odom.get_state()
-            ict_x, ict_y, ict_theta, _ = ict.match(
+            ict_x, ict_y, ict_theta, ict_result = ict.match(
                 cached_distances, base_x, base_y, base_theta
             )
-            odom.set_state(ict_x, ict_y, ict_theta)  # オドメトリ予測基点を補正
+            if ict_result is not None:
+                odom.set_state(ict_x, ict_y, ict_theta)  # オドメトリ予測基点を補正
 
         # ----- [SIM ONLY] 描画・HUD 出力 -----
         if step % DRAW_EVERY == 0 or step % PRINT_EVERY == 0:

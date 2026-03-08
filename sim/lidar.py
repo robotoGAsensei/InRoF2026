@@ -35,6 +35,7 @@ class Lidar:
         ray_from = []
         ray_to = []
 
+        # 画角内に均等にレイを配置してscan
         for i in range(self.NUM_RAYS):
 
             angle = -self.FOV / 2 + self.FOV * i / (self.NUM_RAYS - 1)

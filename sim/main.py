@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 from util import get_joint_index, get_link_index
 from robot import DifferentialRobot
 from lidar import Lidar
+from lidar_odm import LidarOdm
+from ict import ICT
 from obstacle_avoidance import ObstacleAvoidance
 from odometry import Odometry
 
@@ -63,6 +65,19 @@ odom = Odometry(
     initial_theta=init_yaw
 )
 
+# ICT補正されない純粋なオドメトリ（比較表示専用・set_state()を呼ばない）
+odom_pure = Odometry(
+    robot_id,
+    left,
+    right,
+    wheel_radius,
+    wheel_base,
+    dt,
+    initial_x=init_pos[0],
+    initial_y=init_pos[1],
+    initial_theta=init_yaw
+)
+
 def angle_diff(a, b):
     """
     角度差を -π〜π に正規化
@@ -91,6 +106,15 @@ _grid      = np.array(_gmod.GRID, dtype=np.uint8)
 _grid_res  = _gmod.RESOLUTION          # m/cell
 _grid_orig = _gmod.ORIGIN              # (x_min, y_min) [m]
 
+# ===== LidarOdm / ICT 初期化 =====
+_lidar_odm = LidarOdm(
+    _grid, _grid_res, _grid_orig,
+    fov=lidar.FOV,
+    num_rays=lidar.NUM_RAYS,
+    max_dist=lidar.MAX_DIST,
+)
+_ict = ICT(_lidar_odm)
+
 def _world_to_grid(wx: float, wy: float):
     """ワールド座標 → グリッドのピクセル座標 (col, row) に変換。"""
     col = int((wx - _grid_orig[0]) / _grid_res)
@@ -114,25 +138,29 @@ _ax.set_aspect("equal")
 # 現在位置マーカー（初期位置に配置）
 _marker_true, = _ax.plot([], [], "go", markersize=8, label="True",  zorder=5)
 _marker_odom, = _ax.plot([], [], "bo", markersize=8, label="Odom",  zorder=5)
+_marker_ict,  = _ax.plot([], [], "ro", markersize=8, label="ICT",   zorder=5)
 _ax.legend(loc="upper right", fontsize=8)
 plt.tight_layout()
 plt.pause(0.001)
 _TRAJ_Z = 0.02  # 地面より少し上に描画
 prev_odom_x, prev_odom_y   = init_pos[0], init_pos[1]
 prev_true_x, prev_true_y   = init_pos[0], init_pos[1]
+prev_ict_x,  prev_ict_y    = init_pos[0], init_pos[1]
+_ict_x, _ict_y, _ict_theta = init_pos[0], init_pos[1], init_yaw
 
 # 処理間引き用カウンタ
 _step = 0
 _SCAN_EVERY  = 6    # LiDARスキャン+回避計算: 240/6  = 40 Hz
 _DRAW_EVERY  = 24   # 軌跡描画:              240/24 = 10 Hz
 _PRINT_EVERY = 120  # コンソール出力:        240/120 =  2 Hz
+_ICT_EVERY   = 48   # ICTスキャンマッチング: 240/48 =  5 Hz
 
 # キャッシュ用初期値
 _cached_distances = [1.0] * lidar.NUM_RAYS
 _cached_avoid     = (0.0, 0.0)
 
 # ===== HUD テキスト（アニメーション内表示）用 ID =====
-_hud_ids = [-1, -1, -1]  # 3行分
+_hud_ids = [-1, -1, -1, -1]  # 4行分
 
 # ===== 録画用 =====
 _video_log_id  = -1   # -1 = 未録画
@@ -200,10 +228,20 @@ while True:
 
     # ===== オドメトリ更新 =====
     odom.step()
+    odom_pure.step()  # ICT補正なし・表示専用
+
+    # ===== ICT スキャンマッチング（間引き）=====
+    if _step % _ICT_EVERY == 0:
+        _base_x, _base_y, _base_theta = odom.get_state()
+        _ict_x, _ict_y, _ict_theta, _ = _ict.match(
+            _cached_distances, _base_x, _base_y, _base_theta
+        )
+        odom.set_state(_ict_x, _ict_y, _ict_theta)
 
     # ===== 軌跡描画・出力（間引き）=====
     if _step % _DRAW_EVERY == 0 or _step % _PRINT_EVERY == 0:
-        odom_x, odom_y, odom_theta = odom.get_state()
+        # 表示には補正なし専用インスタンスを使用（ICTの影響ゼロ）
+        odom_x, odom_y, odom_theta = odom_pure.get_state()
         true_pos, true_orn = p.getBasePositionAndOrientation(robot_id)
         _, _, true_theta = p.getEulerFromQuaternion(true_orn)
 
@@ -211,6 +249,7 @@ while True:
             # ===== グリッドマップ上の現在位置を更新 =====
             _marker_true.set_data([true_pos[0]], [true_pos[1]])
             _marker_odom.set_data([odom_x],      [odom_y])
+            _marker_ict.set_data( [_ict_x],      [_ict_y])
             _fig.canvas.flush_events()
 
             # オドメトリ軌跡: 青
@@ -234,16 +273,28 @@ while True:
                 )
                 prev_true_x, prev_true_y = tx, ty
 
+            # ICT補正軌跡: 赤
+            if math.hypot(_ict_x - prev_ict_x, _ict_y - prev_ict_y) > 1e-4:
+                p.addUserDebugLine(
+                    [prev_ict_x, prev_ict_y, _TRAJ_Z + 0.001],
+                    [_ict_x,     _ict_y,     _TRAJ_Z + 0.001],
+                    lineColorRGB=[1.0, 0.2, 0.2],
+                    lineWidth=2,
+                )
+                prev_ict_x, prev_ict_y = _ict_x, _ict_y
+
         if _step % _PRINT_EVERY == 0:
             theta_err_odom = angle_diff(true_theta, odom_theta)
+            theta_err_ict  = angle_diff(true_theta, _ict_theta)
             hud_lines = [
                 (f"True  X:{true_pos[0]:+.3f}  Y:{true_pos[1]:+.3f}  th:{math.degrees(true_theta):+.1f}deg", [0.2, 0.4, 1.0]),
                 (f"Odom  X:{odom_x:+.3f}  Y:{odom_y:+.3f}  th:{math.degrees(odom_theta):+.1f}deg",           [0.2, 0.9, 0.2]),
-                (f"Err   dth:{math.degrees(theta_err_odom):+.1f}deg",                                         [0.0, 0.0, 0.0]),
+                (f"ICT   X:{_ict_x:+.3f}  Y:{_ict_y:+.3f}  th:{math.degrees(_ict_theta):+.1f}deg",           [1.0, 0.2, 0.2]),
+                (f"Err Odom:{math.degrees(theta_err_odom):+.1f}deg  ICT:{math.degrees(theta_err_ict):+.1f}deg", [0.0, 0.0, 0.0]),
             ]
             # addUserDebugText は \n 非対応のため1行ずつ描画
-            # NDC y 座標をずらして縦に並べる (-0.80, -0.88, -0.96)
-            for i, ((text, color), ndc_y) in enumerate(zip(hud_lines, [-0.80, -0.88, -0.96])):
+            # NDC y 座標をずらして縦に並べる (-0.74, -0.82, -0.90, -0.98)
+            for i, ((text, color), ndc_y) in enumerate(zip(hud_lines, [-0.74, -0.82, -0.90, -0.98])):
                 pos = _ndc_to_world(0.35, ndc_y)
                 _hud_ids[i] = p.addUserDebugText(
                     text,

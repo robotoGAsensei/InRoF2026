@@ -80,3 +80,8 @@ class Odometry:
 
     def get_state(self):
         return self.x, self.y, self.theta
+
+    def set_state(self, x, y, theta):
+        self.x = x
+        self.y = y
+        self.theta = theta

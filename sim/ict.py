@@ -98,12 +98,16 @@ class ICT:
             {'iters': int}。スキップ時は None。
         """
         # 有効レイ（max_dist 未満でヒットしたレイ）の比率チェック
-        max_dist = self.lidar_odm.MAX_DIST
+        max_dist  = self.lidar_odm.MAX_DIST
         hit_count = sum(1 for d in ref_distances if d < max_dist)
-        if hit_count < len(ref_distances) * self.min_hit_ratio:
-            return base_x, base_y, base_yaw, None
+        hit_ratio = hit_count / len(ref_distances)
+        if hit_ratio < self.min_hit_ratio:
+            return base_x, base_y, base_yaw, {"hit_ratio": hit_ratio, "skipped": True}
+
+        cost_init = self._cost([0.0, 0.0, 0.0], ref_distances, base_x, base_y, base_yaw)
 
         dx, dy, dtheta = 0.0, 0.0, 0.0
+        gx, gy, gt = 0.0, 0.0, 0.0
         for _ in range(maxiter):
             gx, gy, gt = self._gradient(dx, dy, dtheta, ref_distances,
                                         base_x, base_y, base_yaw)
@@ -111,11 +115,20 @@ class ICT:
             dy     -= lr * gy
             dtheta -= lr * gt
 
+        cost_final = self._cost([dx, dy, dtheta], ref_distances, base_x, base_y, base_yaw)
+
         best_x   = base_x   + dx
         best_y   = base_y   + dy
         best_yaw = base_yaw + dtheta
 
-        return best_x, best_y, best_yaw, {"iters": maxiter}
+        return best_x, best_y, best_yaw, {
+            "hit_ratio":  hit_ratio,
+            "skipped":    False,
+            "cost_init":  cost_init,
+            "cost_final": cost_final,
+            "grad":       (gx, gy, gt),
+            "correction": (dx, dy, dtheta),
+        }
 
     # ------------------------------------------------------------------
     # ユーティリティ

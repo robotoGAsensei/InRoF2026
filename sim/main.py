@@ -63,6 +63,7 @@ def _init_simulation():
     p.connect(p.GUI)
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     p.setGravity(0, 0, -9.8)
+    p.setTimeStep(1. / 1000.)  # [SIM ONLY] 物理タイムステップ 1 ms
     p.loadURDF("plane.urdf")
     p.loadURDF("field.urdf", [0, 0, 0], useFixedBase=True)
 
@@ -83,7 +84,7 @@ def _init_simulation():
 
     wheel_radius = 0.03
     wheel_base   = 0.1
-    dt           = 1. / 240.
+    dt           = 1. / 1000.
 
     odom_kwargs = dict(
         robot_id=robot_id, left_joint=left, right_joint=right,
@@ -146,6 +147,46 @@ def _init_map_window(grid, grid_res, grid_orig, width, height):
 
 
 # ---------------------------------------------------------------------------
+# ICT 診断ウィンドウ  [SIM ONLY]
+# ---------------------------------------------------------------------------
+
+def _init_diag_window():
+    """コスト・偏微分・修正量・有効レイ割合の時系列プロットを初期化する。"""
+    fig_d, axes = plt.subplots(4, 1, figsize=(6, 8), sharex=True)
+    fig_d.suptitle("ICT Diagnostics", fontsize=10)
+    ax_cost, ax_grad, ax_corr, ax_hit = axes
+
+    ax_cost.set_ylabel("Cost")
+    ax_cost.set_yscale("log")
+    ax_grad.set_ylabel("Grad norm")
+    ax_corr.set_ylabel("Correction")
+    ax_hit.set_ylabel("Hit ratio")
+    ax_hit.set_xlabel("ICT call #")
+    ax_hit.set_ylim(0, 1.05)
+
+    ln_ci, = ax_cost.plot([], [], color="orange",    lw=1, label="init")
+    ln_cf, = ax_cost.plot([], [], color="red",       lw=1, label="final")
+    ax_cost.legend(fontsize=7, loc="upper right")
+
+    ln_gxy, = ax_grad.plot([], [], color="royalblue", lw=1, label="|gxy|")
+    ln_gt,  = ax_grad.plot([], [], color="purple",    lw=1, label="|gt|")
+    ax_grad.legend(fontsize=7, loc="upper right")
+
+    ln_dx,  = ax_corr.plot([], [], color="blue",   lw=1, label="dx [m]")
+    ln_dy,  = ax_corr.plot([], [], color="orange", lw=1, label="dy [m]")
+    ln_dth, = ax_corr.plot([], [], color="green",  lw=1, label="dθ [deg]")
+    ax_corr.legend(fontsize=7, loc="upper right")
+
+    ln_hit, = ax_hit.plot([], [], color="teal", lw=1)
+    ax_hit.axhline(0.5, color="red", lw=0.8, ls="--")
+
+    plt.tight_layout()
+    plt.pause(0.001)
+
+    return fig_d, axes, (ln_ci, ln_cf, ln_gxy, ln_gt, ln_dx, ln_dy, ln_dth, ln_hit)
+
+
+# ---------------------------------------------------------------------------
 # メイン
 # ---------------------------------------------------------------------------
 
@@ -161,6 +202,14 @@ def main():
     fig, marker_true, marker_odom, marker_ict = _init_map_window(
         grid, grid_res, grid_orig, grid_w, grid_h
     )
+    fig_d, diag_axes, diag_lines = _init_diag_window()  # [SIM ONLY]
+
+    # ===== ICT 診断データ [SIM ONLY] =====
+    diag_t, diag_ci, diag_cf         = [], [], []
+    diag_gxy, diag_gt                = [], []
+    diag_dx, diag_dy, diag_dth       = [], [], []
+    diag_hit                         = []
+    diag_call                        = 0
 
     # ===== 軌跡・HUD 用の状態変数 =====
     TRAJ_Z = 0.02
@@ -170,11 +219,11 @@ def main():
     ict_x, ict_y, ict_theta  = init_pos[0], init_pos[1], init_yaw
     hud_ids = [-1, -1, -1, -1]
 
-    # ===== 処理間引き定数 (240Hz ベース) =====
-    SCAN_EVERY  = 6    # 40 Hz
-    DRAW_EVERY  = 24   # 10 Hz
-    PRINT_EVERY = 120  #  2 Hz
-    ICT_EVERY   = 48   #  5 Hz
+    # ===== 処理間引き定数 (1000Hz ベース) =====
+    SCAN_EVERY  = 25   # 40 Hz
+    DRAW_EVERY  = 100  # 10 Hz
+    PRINT_EVERY = 500  #  2 Hz
+    ICT_EVERY   = 200  #  5 Hz
 
     # ===== キャッシュ =====
     cached_distances = [1.0] * lidar.NUM_RAYS
@@ -243,8 +292,29 @@ def main():
             ict_x, ict_y, ict_theta, ict_result = ict.match(
                 cached_distances, base_x, base_y, base_theta
             )
-            if ict_result is not None:
+            # ----- 診断データ収集 [SIM ONLY] -----
+            diag_call += 1
+            diag_t.append(diag_call)
+            diag_hit.append(ict_result["hit_ratio"])
+            if not ict_result.get("skipped", False):
                 odom.set_state(ict_x, ict_y, ict_theta)  # オドメトリ予測基点を補正
+                gx_v, gy_v, gt_v   = ict_result["grad"]
+                dx_v, dy_v, dth_v  = ict_result["correction"]
+                diag_ci.append(ict_result["cost_init"])
+                diag_cf.append(ict_result["cost_final"])
+                diag_gxy.append(math.hypot(gx_v, gy_v))
+                diag_gt.append(abs(gt_v))
+                diag_dx.append(dx_v)
+                diag_dy.append(dy_v)
+                diag_dth.append(math.degrees(dth_v))
+            else:
+                diag_ci.append(float("nan"))
+                diag_cf.append(float("nan"))
+                diag_gxy.append(float("nan"))
+                diag_gt.append(float("nan"))
+                diag_dx.append(float("nan"))
+                diag_dy.append(float("nan"))
+                diag_dth.append(float("nan"))
 
         # ----- [SIM ONLY] 描画・HUD 出力 -----
         if step % DRAW_EVERY == 0 or step % PRINT_EVERY == 0:
@@ -261,6 +331,22 @@ def main():
                 marker_odom.set_data([odom_x],       [odom_y])
                 marker_ict.set_data( [disp_ict_x],   [disp_ict_y])
                 fig.canvas.flush_events()
+
+                # 診断プロット更新 [SIM ONLY]
+                if diag_t:
+                    ln_ci, ln_cf, ln_gxy_l, ln_gt_l, ln_dx_l, ln_dy_l, ln_dth_l, ln_hit_l = diag_lines
+                    ln_ci.set_data(diag_t, diag_ci)
+                    ln_cf.set_data(diag_t, diag_cf)
+                    ln_gxy_l.set_data(diag_t, diag_gxy)
+                    ln_gt_l.set_data(diag_t, diag_gt)
+                    ln_dx_l.set_data(diag_t, diag_dx)
+                    ln_dy_l.set_data(diag_t, diag_dy)
+                    ln_dth_l.set_data(diag_t, diag_dth)
+                    ln_hit_l.set_data(diag_t, diag_hit)
+                    for ax in diag_axes:
+                        ax.relim()
+                        ax.autoscale_view()
+                    fig_d.canvas.flush_events()
 
                 # オドメトリ軌跡（青）
                 if math.hypot(odom_x - prev_odom_x, odom_y - prev_odom_y) > 1e-4:

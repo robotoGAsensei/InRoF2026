@@ -249,13 +249,16 @@ def main():
         if step % DRAW_EVERY == 0 or step % PRINT_EVERY == 0:
             # odom_pure は ICT の影響を受けない純粋な積分値（比較表示用）
             odom_x, odom_y, odom_theta = odom_pure.get_state()
+            # odom は最後の ICT 補正点から毎ステップ積分済み → DRAW_EVERY 毎に新鮮な値
+            # ICT 計算頻度（ICT_EVERY）に関わらず同じ 10Hz で更新される
+            disp_ict_x, disp_ict_y, disp_ict_theta = odom.get_state()
             true_pos, true_orn = p.getBasePositionAndOrientation(robot_id)
             _, _, true_theta = p.getEulerFromQuaternion(true_orn)
 
             if step % DRAW_EVERY == 0:
-                marker_true.set_data([true_pos[0]], [true_pos[1]])
-                marker_odom.set_data([odom_x],      [odom_y])
-                marker_ict.set_data( [ict_x],       [ict_y])
+                marker_true.set_data([true_pos[0]],  [true_pos[1]])
+                marker_odom.set_data([odom_x],       [odom_y])
+                marker_ict.set_data( [disp_ict_x],   [disp_ict_y])
                 fig.canvas.flush_events()
 
                 # オドメトリ軌跡（青）
@@ -278,21 +281,21 @@ def main():
                     prev_true_x, prev_true_y = tx, ty
 
                 # ICT補正軌跡（赤）
-                if math.hypot(ict_x - prev_ict_x, ict_y - prev_ict_y) > 1e-4:
+                if math.hypot(disp_ict_x - prev_ict_x, disp_ict_y - prev_ict_y) > 1e-4:
                     p.addUserDebugLine(
-                        [prev_ict_x, prev_ict_y, TRAJ_Z + 0.001],
-                        [ict_x,      ict_y,      TRAJ_Z + 0.001],
+                        [prev_ict_x,  prev_ict_y,  TRAJ_Z + 0.001],
+                        [disp_ict_x,  disp_ict_y,  TRAJ_Z + 0.001],
                         lineColorRGB=[1.0, 0.2, 0.2], lineWidth=2,
                     )
-                    prev_ict_x, prev_ict_y = ict_x, ict_y
+                    prev_ict_x, prev_ict_y = disp_ict_x, disp_ict_y
 
             if step % PRINT_EVERY == 0:
                 theta_err_odom = angle_diff(true_theta, odom_theta)
-                theta_err_ict  = angle_diff(true_theta, ict_theta)
+                theta_err_ict  = angle_diff(true_theta, disp_ict_theta)
                 hud_lines = [
                     (f"True  X:{true_pos[0]:+.3f}  Y:{true_pos[1]:+.3f}  th:{math.degrees(true_theta):+.1f}deg", [0.2, 0.4, 1.0]),
                     (f"Odom  X:{odom_x:+.3f}  Y:{odom_y:+.3f}  th:{math.degrees(odom_theta):+.1f}deg",           [0.2, 0.9, 0.2]),
-                    (f"ICT   X:{ict_x:+.3f}  Y:{ict_y:+.3f}  th:{math.degrees(ict_theta):+.1f}deg",             [1.0, 0.2, 0.2]),
+                    (f"ICT   X:{disp_ict_x:+.3f}  Y:{disp_ict_y:+.3f}  th:{math.degrees(disp_ict_theta):+.1f}deg", [1.0, 0.2, 0.2]),
                     (f"Err Odom:{math.degrees(theta_err_odom):+.1f}deg  ICT:{math.degrees(theta_err_ict):+.1f}deg", [0.0, 0.0, 0.0]),
                 ]
                 for i, ((text, color), ndc_y) in enumerate(zip(hud_lines, [-0.74, -0.82, -0.90, -0.98])):

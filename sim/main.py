@@ -3,8 +3,8 @@ import pybullet_data
 import time
 import math
 import os
+import sys
 import numpy as np
-import importlib.util
 import matplotlib
 matplotlib.use("TkAgg")   # PyBullet GUI と共存できる非ブロッキングバックエンド
 import matplotlib.pyplot as plt
@@ -17,292 +17,297 @@ from ict import ICT
 from obstacle_avoidance import ObstacleAvoidance
 from odometry import Odometry
 
-# ===== 初期化 =====
-p.connect(p.GUI)
-p.setAdditionalSearchPath(pybullet_data.getDataPath())
-p.setGravity(0, 0, -9.8)
+# ===========================================================================
+# 移植区分の凡例
+#   [ESP32移植対象]  実機 ESP32 上で C++ に移植して実行する処理
+#   [SIM ONLY]       PyBullet シミュレーション専用。実機では不要または別手段で代替。
+#
+# ESP32移植ファイル対応表:
+#   odometry.py  → Odometry クラス (エンコーダ積分)
+#   lidar_odm.py → LidarOdm クラス (グリッドマップ上のレイマーチング)
+#   ict.py       → ICT クラス      (スキャンマッチング・自己位置補正)
+#   ※ lidar.py はシミュレーション用 LiDAR。実機では実 LiDAR ハードが距離配列を出力。
+# ===========================================================================
 
-p.loadURDF("plane.urdf")
-p.loadURDF("field.urdf", [0, 0, 0], useFixedBase=True)
 
-# ===== ロボットの初期姿勢を指定してurdfをロード =====
-yaw = math.pi / 2   # 90°
-orn = p.getQuaternionFromEuler([0, 0, yaw])
-robot_id = p.loadURDF("robot.urdf",[0.25, -0.25, 0.05],orn)
+# ---------------------------------------------------------------------------
+# ユーティリティ  [ESP32移植対象]
+# ---------------------------------------------------------------------------
 
-# ===== 使用部品のインデックスを取得 =====
-left = get_joint_index(robot_id, "left_wheel_joint")
-right = get_joint_index(robot_id, "right_wheel_joint")
-lidar_link = get_link_index(robot_id, "lidar_link")
-
-robot = DifferentialRobot(robot_id, left, right)
-lidar = Lidar(robot_id, lidar_link)
-
-avoidance = ObstacleAvoidance(
-    fov=lidar.FOV,
-    num_rays=lidar.NUM_RAYS,
-    safe_dist=0.15
-)
-
-init_pos, init_orn = p.getBasePositionAndOrientation(robot_id)
-_, _, init_yaw = p.getEulerFromQuaternion(init_orn)
-
-# 共通の物理パラメータ
-wheel_radius = 0.03
-wheel_base = 0.1
-dt = 1./240.
-
-# オドメトリのみ使用
-odom = Odometry(
-    robot_id,
-    left,
-    right,
-    wheel_radius,
-    wheel_base,
-    dt,
-    initial_x=init_pos[0],
-    initial_y=init_pos[1],
-    initial_theta=init_yaw
-)
-
-# ICT補正されない純粋なオドメトリ（比較表示専用・set_state()を呼ばない）
-odom_pure = Odometry(
-    robot_id,
-    left,
-    right,
-    wheel_radius,
-    wheel_base,
-    dt,
-    initial_x=init_pos[0],
-    initial_y=init_pos[1],
-    initial_theta=init_yaw
-)
-
-def angle_diff(a, b):
-    """
-    角度差を -π〜π に正規化
-    """
+def angle_diff(a: float, b: float) -> float:
+    """角度差を -π〜π に正規化"""
     return np.arctan2(np.sin(a - b), np.cos(a - b))
 
-def _ndc_to_world(ndc_x: float, ndc_y: float, ndc_z: float = 0.0) -> list:
-    """
-    NDC座標 (ndc_x, ndc_y 共に -1～1) をワールド座標へ変換。
-    カメラ姿勢に追従する画面固定位置の計算に使用。
-    """
+
+# ---------------------------------------------------------------------------
+# ユーティリティ  [SIM ONLY]
+# ---------------------------------------------------------------------------
+
+def ndc_to_world(ndc_x: float, ndc_y: float, ndc_z: float = 0.0) -> list:
+    """NDC座標 (-1〜1) をワールド座標へ変換（HUD位置計算用）"""
     cam = p.getDebugVisualizerCamera()
-    V   = np.array(cam[2]).reshape(4, 4).T   # column-major → row-major
+    V   = np.array(cam[2]).reshape(4, 4).T
     P   = np.array(cam[3]).reshape(4, 4).T
     vp_inv = np.linalg.inv(P @ V)
     ndc_h  = np.array([ndc_x, ndc_y, ndc_z, 1.0])
     world_h = vp_inv @ ndc_h
     return (world_h[:3] / world_h[3]).tolist()
 
-# ===== occupancy_grid_data 読み込み =====
-_grid_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "occupancy_grid_data.py")
-_spec = importlib.util.spec_from_file_location("occupancy_grid_data", _grid_py)
-_gmod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_gmod)
-_grid      = np.array(_gmod.GRID, dtype=np.uint8)
-_grid_res  = _gmod.RESOLUTION          # m/cell
-_grid_orig = _gmod.ORIGIN              # (x_min, y_min) [m]
 
-# ===== LidarOdm / ICT 初期化 =====
-_lidar_odm = LidarOdm(
-    _grid, _grid_res, _grid_orig,
-    fov=lidar.FOV,
-    num_rays=lidar.NUM_RAYS,
-    max_dist=lidar.MAX_DIST,
-)
-_ict = ICT(_lidar_odm)
+# ---------------------------------------------------------------------------
+# 初期化ヘルパー  [SIM ONLY]
+# ---------------------------------------------------------------------------
 
-def _world_to_grid(wx: float, wy: float):
-    """ワールド座標 → グリッドのピクセル座標 (col, row) に変換。"""
-    col = int((wx - _grid_orig[0]) / _grid_res)
-    row = int((wy - _grid_orig[1]) / _grid_res)
-    return col, row
+def _init_simulation():
+    """PyBullet・ロボット・センサ・推定器を初期化して返す。"""
+    p.connect(p.GUI)
+    p.setAdditionalSearchPath(pybullet_data.getDataPath())
+    p.setGravity(0, 0, -9.8)
+    p.loadURDF("plane.urdf")
+    p.loadURDF("field.urdf", [0, 0, 0], useFixedBase=True)
 
-# ===== matplotlib マップウィンドウ初期化 =====
-plt.ion()
-_fig, _ax = plt.subplots(figsize=(5, 6))
-_extent = [
-    _grid_orig[0],
-    _grid_orig[0] + _gmod.WIDTH  * _grid_res,
-    _grid_orig[1],
-    _grid_orig[1] + _gmod.HEIGHT * _grid_res,
-]
-_ax.imshow(_grid, origin="lower", cmap="gray_r", extent=_extent, vmin=0, vmax=1)
-_ax.set_title("Occupancy Grid")
-_ax.set_xlabel("X [m]")
-_ax.set_ylabel("Y [m]")
-_ax.set_aspect("equal")
-# 現在位置マーカー（初期位置に配置）
-_marker_true, = _ax.plot([], [], "go", markersize=8, label="True",  zorder=5)
-_marker_odom, = _ax.plot([], [], "bo", markersize=8, label="Odom",  zorder=5)
-_marker_ict,  = _ax.plot([], [], "ro", markersize=8, label="ICT",   zorder=5)
-_ax.legend(loc="upper right", fontsize=8)
-plt.tight_layout()
-plt.pause(0.001)
-_TRAJ_Z = 0.02  # 地面より少し上に描画
-prev_odom_x, prev_odom_y   = init_pos[0], init_pos[1]
-prev_true_x, prev_true_y   = init_pos[0], init_pos[1]
-prev_ict_x,  prev_ict_y    = init_pos[0], init_pos[1]
-_ict_x, _ict_y, _ict_theta = init_pos[0], init_pos[1], init_yaw
+    yaw = math.pi / 2
+    orn = p.getQuaternionFromEuler([0, 0, yaw])
+    robot_id = p.loadURDF("robot.urdf", [0.25, -0.25, 0.05], orn)
 
-# 処理間引き用カウンタ
-_step = 0
-_SCAN_EVERY  = 6    # LiDARスキャン+回避計算: 240/6  = 40 Hz
-_DRAW_EVERY  = 24   # 軌跡描画:              240/24 = 10 Hz
-_PRINT_EVERY = 120  # コンソール出力:        240/120 =  2 Hz
-_ICT_EVERY   = 48   # ICTスキャンマッチング: 240/48 =  5 Hz
+    left       = get_joint_index(robot_id, "left_wheel_joint")
+    right      = get_joint_index(robot_id, "right_wheel_joint")
+    lidar_link = get_link_index(robot_id,  "lidar_link")
 
-# キャッシュ用初期値
-_cached_distances = [1.0] * lidar.NUM_RAYS
-_cached_avoid     = (0.0, 0.0)
+    robot     = DifferentialRobot(robot_id, left, right)
+    lidar     = Lidar(robot_id, lidar_link)
+    avoidance = ObstacleAvoidance(fov=lidar.FOV, num_rays=lidar.NUM_RAYS, safe_dist=0.15)
 
-# ===== HUD テキスト（アニメーション内表示）用 ID =====
-_hud_ids = [-1, -1, -1, -1]  # 4行分
+    init_pos, init_orn = p.getBasePositionAndOrientation(robot_id)
+    _, _, init_yaw = p.getEulerFromQuaternion(init_orn)
 
-# ===== 録画用 =====
-_video_log_id  = -1   # -1 = 未録画
-_video_dir     = os.path.dirname(os.path.abspath(__file__))
-_video_counter = 0    # 連番（複数回録画対応）
-_prev_r_key    = False  # チャタリング防止用
+    wheel_radius = 0.03
+    wheel_base   = 0.1
+    dt           = 1. / 240.
 
-# ===== メインループ =====
-while True:
-    _step += 1
+    odom_kwargs = dict(
+        robot_id=robot_id, left_joint=left, right_joint=right,
+        wheel_radius=wheel_radius, wheel_base=wheel_base, dt=dt,
+        initial_x=init_pos[0], initial_y=init_pos[1], initial_theta=init_yaw,
+    )
+    odom      = Odometry(**odom_kwargs)  # ICT補正あり（予測基点用）
+    odom_pure = Odometry(**odom_kwargs)  # ICT補正なし（比較表示専用）
 
-    # ===== LiDARスキャン・回避計算（間引き） =====
-    if _step % _SCAN_EVERY == 0:
-        _cached_distances, ray_from, ray_to, results = lidar.scan()
-        _cached_avoid = avoidance.compute_avoid_vector(_cached_distances)
-        lidar.draw(ray_from, ray_to, results)
+    return (robot_id, robot, lidar, avoidance,
+            odom, odom_pure,
+            wheel_radius, wheel_base, dt,
+            init_pos, init_yaw)
 
-    avoid_x, avoid_y = _cached_avoid
 
-    # ===== キー入力 =====
-    keys = p.getKeyboardEvents()
+def _init_map(lidar: Lidar):
+    """occupancy_grid_data を読み込み LidarOdm / ICT を生成して返す。"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
+    import occupancy_grid_data as gmod
 
-    # ===== 録画トグル (r キー) =====
-    r_pressed = ord('r') in keys
-    if r_pressed and not _prev_r_key:
-        if _video_log_id == -1:
-            _video_counter += 1
-            _video_path = os.path.join(_video_dir, f"sim_record_{_video_counter:03d}.mp4")
-            _video_log_id = p.startStateLogging(p.STATE_LOGGING_VIDEO_MP4, _video_path)
-            print(f"[録画開始] {_video_path}")
-        else:
-            p.stopStateLogging(_video_log_id)
-            _video_log_id = -1
-            print(f"[録画停止] {_video_path} に保存しました")
-    _prev_r_key = r_pressed
+    grid      = np.array(gmod.GRID, dtype=np.uint8)
+    grid_res  = gmod.RESOLUTION
+    grid_orig = gmod.ORIGIN
 
-    # vx: 並進方向の入力（前進=+, 後退=-）  ※ワールドX軸ではない
-    # vy: 旋回方向の入力（右旋回=+, 左旋回=-）※ワールドY軸への移動ではない
-    vx = 0
-    vy = 0
-    speed = 0.2
+    lidar_odm = LidarOdm(
+        grid, grid_res, grid_orig,
+        fov=lidar.FOV, num_rays=lidar.NUM_RAYS, max_dist=lidar.MAX_DIST,
+    )
+    ict = ICT(lidar_odm)
 
-    if ord('i') in keys:
-        vx = -speed   # 後退
-    if ord('k') in keys:
-        vx = speed    # 前進
-    if ord('j') in keys:
-        vy = -speed   # 左旋回
-    if ord('l') in keys:
-        vy = speed    # 右旋回
+    return grid, grid_res, grid_orig, gmod.WIDTH, gmod.HEIGHT, ict
 
-    # ===== 回避ベクトル合成 =====
-    # cmd_x → robot.set_velocity_vector 内で 並進速度 v [m/s] に変換
-    # cmd_y → robot.set_velocity_vector 内で 角速度 omega [rad/s] に変換
-    # （差動駆動のため横移動不可。cmd_y は旋回にマッピングされる）
-    cmd_x = vx + avoid_x
-    cmd_y = vy + avoid_y
 
-    norm = math.hypot(cmd_x, cmd_y)
-    if norm > 1e-5:
-        cmd_x /= norm
-        cmd_y /= norm
+def _init_map_window(grid, grid_res, grid_orig, width, height):
+    """matplotlib マップウィンドウを初期化して描画オブジェクトを返す。"""
+    plt.ion()
+    fig, ax = plt.subplots(figsize=(5, 6))
+    extent = [
+        grid_orig[0],
+        grid_orig[0] + width  * grid_res,
+        grid_orig[1],
+        grid_orig[1] + height * grid_res,
+    ]
+    ax.imshow(grid, origin="lower", cmap="gray_r", extent=extent, vmin=0, vmax=1)
+    ax.set_title("Occupancy Grid")
+    ax.set_xlabel("X [m]")
+    ax.set_ylabel("Y [m]")
+    ax.set_aspect("equal")
 
-    robot.set_velocity_vector(cmd_x, cmd_y)
+    marker_true, = ax.plot([], [], "go", markersize=8, label="True", zorder=5)
+    marker_odom, = ax.plot([], [], "bo", markersize=8, label="Odom", zorder=5)
+    marker_ict,  = ax.plot([], [], "ro", markersize=8, label="ICT",  zorder=5)
+    ax.legend(loc="upper right", fontsize=8)
+    plt.tight_layout()
+    plt.pause(0.001)
 
-    # ===== オドメトリ更新 =====
-    odom.step()
-    odom_pure.step()  # ICT補正なし・表示専用
+    return fig, marker_true, marker_odom, marker_ict
 
-    # ===== ICT スキャンマッチング（間引き）=====
-    if _step % _ICT_EVERY == 0:
-        _base_x, _base_y, _base_theta = odom.get_state()
-        _ict_x, _ict_y, _ict_theta, _ = _ict.match(
-            _cached_distances, _base_x, _base_y, _base_theta
-        )
-        odom.set_state(_ict_x, _ict_y, _ict_theta)
 
-    # ===== 軌跡描画・出力（間引き）=====
-    if _step % _DRAW_EVERY == 0 or _step % _PRINT_EVERY == 0:
-        # 表示には補正なし専用インスタンスを使用（ICTの影響ゼロ）
-        odom_x, odom_y, odom_theta = odom_pure.get_state()
-        true_pos, true_orn = p.getBasePositionAndOrientation(robot_id)
-        _, _, true_theta = p.getEulerFromQuaternion(true_orn)
+# ---------------------------------------------------------------------------
+# メイン
+# ---------------------------------------------------------------------------
 
-        if _step % _DRAW_EVERY == 0:
-            # ===== グリッドマップ上の現在位置を更新 =====
-            _marker_true.set_data([true_pos[0]], [true_pos[1]])
-            _marker_odom.set_data([odom_x],      [odom_y])
-            _marker_ict.set_data( [_ict_x],      [_ict_y])
-            _fig.canvas.flush_events()
+def main():
+    # ===== 初期化 =====
+    (robot_id, robot, lidar, avoidance,
+     odom, odom_pure,
+     wheel_radius, wheel_base, dt,
+     init_pos, init_yaw) = _init_simulation()
 
-            # オドメトリ軌跡: 青
-            if math.hypot(odom_x - prev_odom_x, odom_y - prev_odom_y) > 1e-4:
-                p.addUserDebugLine(
-                    [prev_odom_x, prev_odom_y, _TRAJ_Z],
-                    [odom_x,      odom_y,      _TRAJ_Z],
-                    lineColorRGB=[0.2, 0.4, 1.0],
-                    lineWidth=2,
-                )
-                prev_odom_x, prev_odom_y = odom_x, odom_y
+    grid, grid_res, grid_orig, grid_w, grid_h, ict = _init_map(lidar)
 
-            # 真値軌跡: 緑
-            tx, ty = true_pos[0], true_pos[1]
-            if math.hypot(tx - prev_true_x, ty - prev_true_y) > 1e-4:
-                p.addUserDebugLine(
-                    [prev_true_x, prev_true_y, _TRAJ_Z],
-                    [tx,          ty,          _TRAJ_Z],
-                    lineColorRGB=[0.2, 0.9, 0.2],
-                    lineWidth=2,
-                )
-                prev_true_x, prev_true_y = tx, ty
+    fig, marker_true, marker_odom, marker_ict = _init_map_window(
+        grid, grid_res, grid_orig, grid_w, grid_h
+    )
 
-            # ICT補正軌跡: 赤
-            if math.hypot(_ict_x - prev_ict_x, _ict_y - prev_ict_y) > 1e-4:
-                p.addUserDebugLine(
-                    [prev_ict_x, prev_ict_y, _TRAJ_Z + 0.001],
-                    [_ict_x,     _ict_y,     _TRAJ_Z + 0.001],
-                    lineColorRGB=[1.0, 0.2, 0.2],
-                    lineWidth=2,
-                )
-                prev_ict_x, prev_ict_y = _ict_x, _ict_y
+    # ===== 軌跡・HUD 用の状態変数 =====
+    TRAJ_Z = 0.02
+    prev_odom_x, prev_odom_y = init_pos[0], init_pos[1]
+    prev_true_x, prev_true_y = init_pos[0], init_pos[1]
+    prev_ict_x,  prev_ict_y  = init_pos[0], init_pos[1]
+    ict_x, ict_y, ict_theta  = init_pos[0], init_pos[1], init_yaw
+    hud_ids = [-1, -1, -1, -1]
 
-        if _step % _PRINT_EVERY == 0:
-            theta_err_odom = angle_diff(true_theta, odom_theta)
-            theta_err_ict  = angle_diff(true_theta, _ict_theta)
-            hud_lines = [
-                (f"True  X:{true_pos[0]:+.3f}  Y:{true_pos[1]:+.3f}  th:{math.degrees(true_theta):+.1f}deg", [0.2, 0.4, 1.0]),
-                (f"Odom  X:{odom_x:+.3f}  Y:{odom_y:+.3f}  th:{math.degrees(odom_theta):+.1f}deg",           [0.2, 0.9, 0.2]),
-                (f"ICT   X:{_ict_x:+.3f}  Y:{_ict_y:+.3f}  th:{math.degrees(_ict_theta):+.1f}deg",           [1.0, 0.2, 0.2]),
-                (f"Err Odom:{math.degrees(theta_err_odom):+.1f}deg  ICT:{math.degrees(theta_err_ict):+.1f}deg", [0.0, 0.0, 0.0]),
-            ]
-            # addUserDebugText は \n 非対応のため1行ずつ描画
-            # NDC y 座標をずらして縦に並べる (-0.74, -0.82, -0.90, -0.98)
-            for i, ((text, color), ndc_y) in enumerate(zip(hud_lines, [-0.74, -0.82, -0.90, -0.98])):
-                pos = _ndc_to_world(0.35, ndc_y)
-                _hud_ids[i] = p.addUserDebugText(
-                    text,
-                    textPosition=pos,
-                    textColorRGB=color,
-                    textSize=1.0,
-                    **({} if _hud_ids[i] == -1 else {"replaceItemUniqueId": _hud_ids[i]}),
-                )
+    # ===== 処理間引き定数 (240Hz ベース) =====
+    SCAN_EVERY  = 6    # 40 Hz
+    DRAW_EVERY  = 24   # 10 Hz
+    PRINT_EVERY = 120  #  2 Hz
+    ICT_EVERY   = 48   #  5 Hz
 
-    p.stepSimulation()
-    time.sleep(dt)
+    # ===== キャッシュ =====
+    cached_distances = [1.0] * lidar.NUM_RAYS
+    cached_avoid     = (0.0, 0.0)
+
+    # ===== 録画用 =====
+    video_log_id  = -1
+    video_dir     = os.path.dirname(os.path.abspath(__file__))
+    video_counter = 0
+    prev_r_key    = False
+
+    # ===== メインループ =====
+    step = 0
+    while True:
+        step += 1
+
+        # ----- [SIM ONLY] LiDARスキャン（PyBullet rayTestBatch で距離列を取得） -----
+        # 実機では実 LiDAR ハードが cached_distances 相当の距離配列を直接出力する
+        if step % SCAN_EVERY == 0:
+            cached_distances, ray_from, ray_to, results = lidar.scan()
+            cached_avoid = avoidance.compute_avoid_vector(cached_distances)
+            lidar.draw(ray_from, ray_to, results)  # [SIM ONLY] レイ可視化
+
+        avoid_x, avoid_y = cached_avoid
+
+        # ----- [SIM ONLY] キー入力・録画・モータ指令 -----
+        keys = p.getKeyboardEvents()
+
+        # 録画トグル (r キー)
+        r_pressed = ord('r') in keys
+        if r_pressed and not prev_r_key:
+            if video_log_id == -1:
+                video_counter += 1
+                video_path = os.path.join(video_dir, f"sim_record_{video_counter:03d}.mp4")
+                video_log_id = p.startStateLogging(p.STATE_LOGGING_VIDEO_MP4, video_path)
+                print(f"[録画開始] {video_path}")
+            else:
+                p.stopStateLogging(video_log_id)
+                video_log_id = -1
+                print(f"[録画停止] {video_path} に保存しました")
+        prev_r_key = r_pressed
+
+        # 移動入力 (i=後退 / k=前進 / j=左旋回 / l=右旋回)
+        speed = 0.2
+        vx = -speed if ord('i') in keys else (speed if ord('k') in keys else 0.0)
+        vy = -speed if ord('j') in keys else (speed if ord('l') in keys else 0.0)
+
+        # 回避ベクトル合成・正規化
+        cmd_x = vx + avoid_x
+        cmd_y = vy + avoid_y
+        norm  = math.hypot(cmd_x, cmd_y)
+        if norm > 1e-5:
+            cmd_x /= norm
+            cmd_y /= norm
+        robot.set_velocity_vector(cmd_x, cmd_y)  # [SIM ONLY] PyBullet モータ制御
+
+        # ----- [ESP32移植対象] オドメトリ積分 (odometry.py → Odometry クラス) -----
+        odom.step()
+        odom_pure.step()  # [SIM ONLY] 比較表示専用（実機では不要）
+
+        # ----- [ESP32移植対象] ICT スキャンマッチング・自己位置補正 -----
+        #   使用クラス: lidar_odm.py (LidarOdm) + ict.py (ICT)
+        #   cached_distances : 実機 LiDAR から取得した距離配列に相当
+        if step % ICT_EVERY == 0:
+            base_x, base_y, base_theta = odom.get_state()
+            ict_x, ict_y, ict_theta, _ = ict.match(
+                cached_distances, base_x, base_y, base_theta
+            )
+            odom.set_state(ict_x, ict_y, ict_theta)  # オドメトリ予測基点を補正
+
+        # ----- [SIM ONLY] 描画・HUD 出力 -----
+        if step % DRAW_EVERY == 0 or step % PRINT_EVERY == 0:
+            # odom_pure は ICT の影響を受けない純粋な積分値（比較表示用）
+            odom_x, odom_y, odom_theta = odom_pure.get_state()
+            true_pos, true_orn = p.getBasePositionAndOrientation(robot_id)
+            _, _, true_theta = p.getEulerFromQuaternion(true_orn)
+
+            if step % DRAW_EVERY == 0:
+                marker_true.set_data([true_pos[0]], [true_pos[1]])
+                marker_odom.set_data([odom_x],      [odom_y])
+                marker_ict.set_data( [ict_x],       [ict_y])
+                fig.canvas.flush_events()
+
+                # オドメトリ軌跡（青）
+                if math.hypot(odom_x - prev_odom_x, odom_y - prev_odom_y) > 1e-4:
+                    p.addUserDebugLine(
+                        [prev_odom_x, prev_odom_y, TRAJ_Z],
+                        [odom_x,      odom_y,      TRAJ_Z],
+                        lineColorRGB=[0.2, 0.4, 1.0], lineWidth=2,
+                    )
+                    prev_odom_x, prev_odom_y = odom_x, odom_y
+
+                # 真値軌跡（緑）
+                tx, ty = true_pos[0], true_pos[1]
+                if math.hypot(tx - prev_true_x, ty - prev_true_y) > 1e-4:
+                    p.addUserDebugLine(
+                        [prev_true_x, prev_true_y, TRAJ_Z],
+                        [tx,          ty,          TRAJ_Z],
+                        lineColorRGB=[0.2, 0.9, 0.2], lineWidth=2,
+                    )
+                    prev_true_x, prev_true_y = tx, ty
+
+                # ICT補正軌跡（赤）
+                if math.hypot(ict_x - prev_ict_x, ict_y - prev_ict_y) > 1e-4:
+                    p.addUserDebugLine(
+                        [prev_ict_x, prev_ict_y, TRAJ_Z + 0.001],
+                        [ict_x,      ict_y,      TRAJ_Z + 0.001],
+                        lineColorRGB=[1.0, 0.2, 0.2], lineWidth=2,
+                    )
+                    prev_ict_x, prev_ict_y = ict_x, ict_y
+
+            if step % PRINT_EVERY == 0:
+                theta_err_odom = angle_diff(true_theta, odom_theta)
+                theta_err_ict  = angle_diff(true_theta, ict_theta)
+                hud_lines = [
+                    (f"True  X:{true_pos[0]:+.3f}  Y:{true_pos[1]:+.3f}  th:{math.degrees(true_theta):+.1f}deg", [0.2, 0.4, 1.0]),
+                    (f"Odom  X:{odom_x:+.3f}  Y:{odom_y:+.3f}  th:{math.degrees(odom_theta):+.1f}deg",           [0.2, 0.9, 0.2]),
+                    (f"ICT   X:{ict_x:+.3f}  Y:{ict_y:+.3f}  th:{math.degrees(ict_theta):+.1f}deg",             [1.0, 0.2, 0.2]),
+                    (f"Err Odom:{math.degrees(theta_err_odom):+.1f}deg  ICT:{math.degrees(theta_err_ict):+.1f}deg", [0.0, 0.0, 0.0]),
+                ]
+                for i, ((text, color), ndc_y) in enumerate(zip(hud_lines, [-0.74, -0.82, -0.90, -0.98])):
+                    pos = ndc_to_world(0.35, ndc_y)
+                    hud_ids[i] = p.addUserDebugText(
+                        text,
+                        textPosition=pos,
+                        textColorRGB=color,
+                        textSize=1.0,
+                        **({} if hud_ids[i] == -1 else {"replaceItemUniqueId": hud_ids[i]}),
+                    )
+
+        p.stepSimulation()  # [SIM ONLY]
+        time.sleep(dt)
+
+
+if __name__ == "__main__":
+    main()

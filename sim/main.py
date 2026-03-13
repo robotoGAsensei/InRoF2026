@@ -220,7 +220,7 @@ def main():
     hud_ids = [-1, -1, -1, -1]
 
     # ===== 処理間引き定数 (1000Hz ベース) =====
-    SCAN_EVERY  = 25   # 40 Hz
+    SCAN_EVERY  = 50   # 20 Hz
     DRAW_EVERY  = 100  # 10 Hz
     PRINT_EVERY = 500  #  2 Hz
     ICT_EVERY   = 200  #  5 Hz
@@ -245,7 +245,7 @@ def main():
         if step % SCAN_EVERY == 0:
             cached_distances, ray_from, ray_to, results = lidar.scan()
             cached_avoid = avoidance.compute_avoid_vector(cached_distances)
-            lidar.draw(ray_from, ray_to, results)  # [SIM ONLY] レイ可視化
+            lidar.draw(ray_from[::10], ray_to[::10], results[::10])  # [SIM ONLY] レイ可視化（1/10間引き）
 
         avoid_x, avoid_y = cached_avoid
 

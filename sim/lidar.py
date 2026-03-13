@@ -6,7 +6,7 @@ class Lidar:
 
     def __init__(self, robot_id, link_index,
                  fov=math.radians(85),
-                 num_rays=60,
+                 num_rays=150,
                  max_dist=1.0,
                  lidar_height=0.03):   # ← 高さ固定追加
 
@@ -85,6 +85,9 @@ class Lidar:
         return distances, ray_from, ray_to, results
 
     def draw(self, ray_from, ray_to, results):
+        n = len(results)
+        if len(self.debug_ids) != n:
+            self.debug_ids = [-1] * n
 
         for i, r in enumerate(results):
             color = [1, 0, 0] if r[2] < 1 else [0, 1, 0]
